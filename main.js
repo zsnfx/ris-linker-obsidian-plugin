@@ -28,11 +28,14 @@ var import_view = require("@codemirror/view");
 var DEFAULT_SETTINGS = {
   autoReplaceEnabled: true
 };
-var prefixRegex = /((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§|Art\.?)\s*(\d+[a-z]*)/g;
-var postfixRegex = /(§|Art\.?)\s*(\d+[a-z]*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)/g;
-function getRisUrl(law, type, num) {
+var prefixRegex = /((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)$/;
+var postfixRegex = /(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)$/;
+function getRisUrl(law, type, numString) {
   const isArt = type.includes("Art");
-  return `[https://www.ris.bka.gv.at/Ergebnis.wxe?Abfrage=Bundesnormen&Titel=$](https://www.ris.bka.gv.at/Ergebnis.wxe?Abfrage=Bundesnormen&Titel=$){law}&${isArt ? "VonArtikel" : "VonParagraf"}=${num}&${isArt ? "BisArtikel" : "BisParagraf"}=${num}`;
+  const paramType = isArt ? "Artikel" : "Paragraf";
+  const firstNumMatch = numString.match(/\d+[a-z]*/);
+  const firstNum = firstNumMatch ? firstNumMatch[0] : numString;
+  return "https://www.ris.bka.gv.at/Ergebnis.wxe?Abfrage=Bundesnormen&Titel=" + law + "&Von" + paramType + "=" + firstNum + "&Bis" + paramType + "=" + firstNum;
 }
 var RisLinkerPlugin = class extends import_obsidian.Plugin {
   async onload() {
@@ -58,29 +61,29 @@ var RisLinkerPlugin = class extends import_obsidian.Plugin {
           if (insertedString !== " " && insertedString !== "\n")
             return;
           const checkStart = Math.max(0, toB - 100);
-          const textToInspect = update.state.doc.sliceString(checkStart, toB);
-          this.checkAndReplace(update, textToInspect, checkStart, fromB, prefixRegex, 2, 3, 4, 1);
-          this.checkAndReplace(update, textToInspect, checkStart, fromB, postfixRegex, 4, 1, 2, 3);
+          const textToInspect = update.state.doc.sliceString(checkStart, fromB);
+          this.checkAndReplace(update, textToInspect, fromB, prefixRegex, 2, 3, 4);
+          this.checkAndReplace(update, textToInspect, fromB, postfixRegex, 4, 1, 2);
         });
       }
-      checkAndReplace(update, text, offset, cursor, regex, lawIdx, symIdx, numIdx, fullWrapIdx) {
-        regex.lastIndex = 0;
-        let match;
-        let lastMatch = null;
-        while ((match = regex.exec(text)) !== null)
-          lastMatch = match;
-        if (lastMatch) {
-          const matchEnd = offset + lastMatch.index + lastMatch[0].length;
-          if (matchEnd === cursor) {
-            const law = lastMatch[lawIdx];
-            const sym = lastMatch[symIdx];
-            const num = lastMatch[numIdx];
-            const url = getRisUrl(law, sym, num);
-            const markdownLink = `[${lastMatch[0]}](${url})`;
-            setTimeout(() => {
-              update.view.dispatch({ changes: { from: matchEnd - lastMatch[0].length, to: matchEnd, insert: markdownLink } });
-            }, 0);
-          }
+      checkAndReplace(update, text, cursor, regex, lawIdx, symIdx, numIdx) {
+        const match = regex.exec(text);
+        if (match) {
+          const fullMatch = match[0];
+          const law = match[lawIdx];
+          const sym = match[symIdx];
+          const num = match[numIdx];
+          const url = getRisUrl(law, sym, num);
+          const markdownLink = "[" + fullMatch + "](" + url + ")";
+          setTimeout(() => {
+            update.view.dispatch({
+              changes: {
+                from: cursor - fullMatch.length,
+                to: cursor,
+                insert: markdownLink
+              }
+            });
+          }, 0);
         }
       }
     }));
@@ -95,18 +98,17 @@ var RisLinkerPlugin = class extends import_obsidian.Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
   }
-  // Function to batch process the whole file
   convertEntireFile(editor) {
     let content = editor.getValue();
-    content = content.replace(prefixRegex, (match, fullWrap, law, sym, num) => {
+    content = content.replace(/((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)/g, (match, fullWrap, law, sym, num) => {
       if (match.includes("]("))
         return match;
-      return `[${match}](${getRisUrl(law, sym, num)})`;
+      return "[" + match + "](" + getRisUrl(law, sym, num) + ")";
     });
-    content = content.replace(postfixRegex, (match, sym, num, fullWrap, law) => {
+    content = content.replace(/(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)/g, (match, sym, num, fullWrap, law) => {
       if (match.includes("]("))
         return match;
-      return `[${match}](${getRisUrl(law, sym, num)})`;
+      return "[" + match + "](" + getRisUrl(law, sym, num) + ")";
     });
     editor.setValue(content);
   }
@@ -120,7 +122,7 @@ var RisLinkerSettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "RIS Auto Linker Settings" });
-    new import_obsidian.Setting(containerEl).setName("Live Auto-Replace").setDesc("Automatically convert citations into Markdown links as you type (triggers on space/enter).").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoReplaceEnabled).onChange(async (value) => {
+    new import_obsidian.Setting(containerEl).setName("Live Auto-Replace").setDesc("Automatically convert citations into Markdown links as you type.").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoReplaceEnabled).onChange(async (value) => {
       this.plugin.settings.autoReplaceEnabled = value;
       await this.plugin.saveSettings();
     }));

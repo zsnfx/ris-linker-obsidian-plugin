@@ -1,7 +1,6 @@
 import { App, Plugin, PluginSettingTab, Setting, Editor, MarkdownView } from 'obsidian';
-import { EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
+import { ViewPlugin, ViewUpdate } from '@codemirror/view';
 
-// --- PLUGIN INTERFACES ---
 interface RisLinkerSettings {
     autoReplaceEnabled: boolean;
 }
@@ -10,18 +9,24 @@ const DEFAULT_SETTINGS: RisLinkerSettings = {
     autoReplaceEnabled: true
 }
 
-// --- REGEX DEFINITIONS ---
-// Pattern 1: ABGB § 1330 (Prefix)
-const prefixRegex = /((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§|Art\.?)\s*(\d+[a-z]*)/g;
-// Pattern 2: § 1330 ABGB (Postfix)
-const postfixRegex = /(§|Art\.?)\s*(\d+[a-z]*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)/g;
+// Matches: ABGB § 1330 OR ABGB §§ 6, 7 OR ABGB § 6 und 7
+const prefixRegex = /((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)$/;
 
-function getRisUrl(law: string, type: string, num: string): string {
+// Matches: § 1330 ABGB OR §§ 6, 7 ABGB OR § 6 und 7 ABGB
+const postfixRegex = /(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)$/;
+
+function getRisUrl(law: string, type: string, numString: string): string {
     const isArt = type.includes('Art');
-    return `[https://www.ris.bka.gv.at/Ergebnis.wxe?Abfrage=Bundesnormen&Titel=$](https://www.ris.bka.gv.at/Ergebnis.wxe?Abfrage=Bundesnormen&Titel=$){law}&${isArt ? 'VonArtikel' : 'VonParagraf'}=${num}&${isArt ? 'BisArtikel' : 'BisParagraf'}=${num}`;
+    const paramType = isArt ? "Artikel" : "Paragraf";
+
+    // Extract the FIRST continuous string of digits (and optional letters like 12a)
+    // E.g., from "6, 7" it extracts "6". From "12a und 12b" it extracts "12a".
+    const firstNumMatch = numString.match(/\d+[a-z]*/);
+    const firstNum = firstNumMatch ? firstNumMatch[0] : numString;
+
+    return "https://www.ris.bka.gv.at/Ergebnis.wxe?Abfrage=Bundesnormen&Titel=" + law + "&Von" + paramType + "=" + firstNum + "&Bis" + paramType + "=" + firstNum;
 }
 
-// --- MAIN PLUGIN CLASS ---
 export default class RisLinkerPlugin extends Plugin {
     settings: RisLinkerSettings;
 
@@ -29,10 +34,8 @@ export default class RisLinkerPlugin extends Plugin {
         console.log("Loading RIS Linker");
         await this.loadSettings();
 
-        // 1. Add Settings Tab
         this.addSettingTab(new RisLinkerSettingTab(this.app, this));
 
-        // 2. Add Command Palette Action (Batch process entire file)
         this.addCommand({
             id: 'convert-all-ris-links',
             name: 'Convert all Austrian law citations in current file to RIS links',
@@ -41,11 +44,10 @@ export default class RisLinkerPlugin extends Plugin {
             }
         });
 
-        // 3. Register the Live Typing Auto-Replacer
         this.registerEditorExtension(ViewPlugin.fromClass(class {
             plugin = this;
             update(update: ViewUpdate) {
-                // @ts-ignore - access plugin instance via closure
+                // @ts-ignore
                 if (!window.risPluginInstance?.settings.autoReplaceEnabled || !update.docChanged) return;
 
                 update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
@@ -53,40 +55,42 @@ export default class RisLinkerPlugin extends Plugin {
                     if (insertedString !== ' ' && insertedString !== '\n') return;
 
                     const checkStart = Math.max(0, toB - 100);
-                    const textToInspect = update.state.doc.sliceString(checkStart, toB);
+                    // Slice exactly up to the space that was just typed
+                    const textToInspect = update.state.doc.sliceString(checkStart, fromB);
 
                     // Check Prefix Pattern (ABGB § 1)
-                    this.checkAndReplace(update, textToInspect, checkStart, fromB, prefixRegex, 2, 3, 4, 1);
+                    this.checkAndReplace(update, textToInspect, fromB, prefixRegex, 2, 3, 4);
 
                     // Check Postfix Pattern (§ 1 ABGB)
-                    this.checkAndReplace(update, textToInspect, checkStart, fromB, postfixRegex, 4, 1, 2, 3);
+                    this.checkAndReplace(update, textToInspect, fromB, postfixRegex, 4, 1, 2);
                 });
             }
 
-            checkAndReplace(update: ViewUpdate, text: string, offset: number, cursor: number, regex: RegExp, lawIdx: number, symIdx: number, numIdx: number, fullWrapIdx: number) {
-                regex.lastIndex = 0;
-                let match;
-                let lastMatch = null;
-                while ((match = regex.exec(text)) !== null) lastMatch = match;
+            checkAndReplace(update: ViewUpdate, text: string, cursor: number, regex: RegExp, lawIdx: number, symIdx: number, numIdx: number) {
+                const match = regex.exec(text);
 
-                if (lastMatch) {
-                    const matchEnd = offset + lastMatch.index + lastMatch[0].length;
-                    if (matchEnd === cursor) {
-                        const law = lastMatch[lawIdx];
-                        const sym = lastMatch[symIdx];
-                        const num = lastMatch[numIdx];
-                        const url = getRisUrl(law, sym, num);
-                        const markdownLink = `[${lastMatch[0]}](${url})`;
+                if (match) {
+                    const fullMatch = match[0];
+                    const law = match[lawIdx];
+                    const sym = match[symIdx];
+                    const num = match[numIdx];
 
-                        setTimeout(() => {
-                            update.view.dispatch({ changes: { from: matchEnd - lastMatch[0].length, to: matchEnd, insert: markdownLink } });
-                        }, 0);
-                    }
+                    const url = getRisUrl(law, sym, num);
+                    const markdownLink = "[" + fullMatch + "](" + url + ")";
+
+                    setTimeout(() => {
+                        update.view.dispatch({
+                            changes: {
+                                from: cursor - fullMatch.length,
+                                to: cursor,
+                                insert: markdownLink
+                            }
+                        });
+                    }, 0);
                 }
             }
         }));
 
-        // Store instance for the CodeMirror extension to access settings
         // @ts-ignore
         window.risPluginInstance = this;
     }
@@ -104,28 +108,25 @@ export default class RisLinkerPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 
-    // Function to batch process the whole file
     convertEntireFile(editor: Editor) {
         let content = editor.getValue();
 
-        // Replace Prefix (ABGB § 1)
-        content = content.replace(prefixRegex, (match, fullWrap, law, sym, num) => {
-            // Ignore if already inside a markdown link
+        // Replace Prefix globally
+        content = content.replace(/((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)/g, (match, fullWrap, law, sym, num) => {
             if (match.includes('](')) return match;
-            return `[${match}](${getRisUrl(law, sym, num)})`;
+            return "[" + match + "](" + getRisUrl(law, sym, num) + ")";
         });
 
-        // Replace Postfix (§ 1 ABGB)
-        content = content.replace(postfixRegex, (match, sym, num, fullWrap, law) => {
+        // Replace Postfix globally
+        content = content.replace(/(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)/g, (match, sym, num, fullWrap, law) => {
             if (match.includes('](')) return match;
-            return `[${match}](${getRisUrl(law, sym, num)})`;
+            return "[" + match + "](" + getRisUrl(law, sym, num) + ")";
         });
 
         editor.setValue(content);
     }
 }
 
-// --- SETTINGS TAB UI ---
 class RisLinkerSettingTab extends PluginSettingTab {
     plugin: RisLinkerPlugin;
 
@@ -137,12 +138,11 @@ class RisLinkerSettingTab extends PluginSettingTab {
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
-
         containerEl.createEl('h2', { text: 'RIS Auto Linker Settings' });
 
         new Setting(containerEl)
             .setName('Live Auto-Replace')
-            .setDesc('Automatically convert citations into Markdown links as you type (triggers on space/enter).')
+            .setDesc('Automatically convert citations into Markdown links as you type.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.autoReplaceEnabled)
                 .onChange(async (value) => {
