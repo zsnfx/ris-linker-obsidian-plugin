@@ -1,0 +1,31 @@
+# Node dependencies
+node_modules/
+
+# Build files
+# (We don't ignore main.js or manifest.json because users need them to install the plugin manually,
+# but we DO ignore the source maps and other temporary build artifacts if they exist)
+*.map
+
+# Obsidian specific vault files
+# (Prevents accidentally committing your personal vault notes if you are developing inside your live vault)
+.obsidian/
+!.obsidian/plugins/ris-linker/
+*.md
+!README.md
+!CHANGELOG.md
+
+
+# Windows system files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor directories and files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

@@ -1,0 +1,9 @@
+{
+  "id": "ris-linker",
+  "name": "RIS Auto Linker",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Automatically links Austrian laws (ABGB, B-VG, etc.) to the RIS",
+  "author": "zsnfx",
+  "isDesktopOnly": false
+}
