@@ -1,9 +1,11 @@
 import { Plugin } from 'obsidian';
-import { RangeSetBuilder } from '@codemirror/state';
-import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
+import { EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
 
+// Regular expression to match "Law § Number" or "Law Art Number"
+// We use the 'g' flag to find it, but we will test it against the text immediately typed.
 const lawRegex = /([a-zA-ZÄÖÜäöü-]+)\s*(§|Art\.?)\s*(\d+[a-z]*)/g;
 
+// Helper function to generate the RIS URL
 function getRisUrl(law: string, type: string, num: string): string {
     const isArt = type.includes('Art');
     if (isArt) {
@@ -13,88 +15,77 @@ function getRisUrl(law: string, type: string, num: string): string {
     }
 }
 
-const risLivePreviewPlugin = ViewPlugin.fromClass(class {
-    decorations: DecorationSet;
-
-    constructor(view: EditorView) {
-        this.decorations = this.buildDecorations(view);
-    }
-
+// CodeMirror Extension that watches for typing and replaces text
+const autoReplacePlugin = ViewPlugin.fromClass(class {
     update(update: ViewUpdate) {
-        if (update.docChanged || update.viewportChanged) {
-            this.decorations = this.buildDecorations(update.view);
-        }
-    }
+        // Only run if the document actually changed
+        if (!update.docChanged) return;
 
-    buildDecorations(view: EditorView) {
-        const builder = new RangeSetBuilder<Decoration>();
-        for (let { from, to } of view.visibleRanges) {
-            const text = view.state.doc.sliceString(from, to);
+        // Iterate through all changes in this transaction
+        update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+            // We only care about text being inserted (typing)
+            if (inserted.length === 0) return;
+
+            // Get the text just typed. We want to trigger when the user types a space or newline
+            // AFTER typing a citation.
+            const insertedString = inserted.toString();
+            if (insertedString !== ' ' && insertedString !== '\n') return;
+
+            // Look at the text immediately preceding the space/newline
+            // We grab the last 50 characters to ensure we capture the whole citation
+            const checkStart = Math.max(0, toB - 50);
+            const textToInspect = update.state.doc.sliceString(checkStart, toB);
+
+            // Reset regex state
+            lawRegex.lastIndex = 0;
             let match;
-            while ((match = lawRegex.exec(text)) !== null) {
-                const start = from + match.index;
-                const end = start + match[0].length;
-                const url = getRisUrl(match[1], match[2], match[3]);
+            let lastMatch = null;
 
-                builder.add(start, end, Decoration.mark({
-                    tagName: "a",
-                    class: "cm-url",
-                    attributes: { href: url, target: "_blank", rel: "noopener" }
-                }));
+            // Find the last match in the string
+            while ((match = lawRegex.exec(textToInspect)) !== null) {
+                lastMatch = match;
             }
-        }
-        return builder.finish();
+
+            if (lastMatch) {
+                // Ensure the match is exactly what precedes the space/newline we just typed.
+                // We check if the match ends exactly where the space was inserted.
+                const matchEndIndexInState = checkStart + lastMatch.index + lastMatch[0].length;
+
+                if (matchEndIndexInState === fromB) {
+                    const law = lastMatch[1];
+                    const symbol = lastMatch[2];
+                    const num = lastMatch[3];
+
+                    const originalText = lastMatch[0];
+                    const url = getRisUrl(law, symbol, num);
+                    const markdownLink = `[${originalText}](${url})`;
+
+                    // Dispatch a new transaction to replace the raw text with the Markdown link
+                    // setTimeout is required to avoid dispatching a transaction inside an update cycle
+                    setTimeout(() => {
+                        update.view.dispatch({
+                            changes: {
+                                from: matchEndIndexInState - originalText.length,
+                                to: matchEndIndexInState,
+                                insert: markdownLink
+                            }
+                        });
+                    }, 0);
+                }
+            }
+        });
     }
-}, {
-    decorations: v => v.decorations
 });
 
 export default class RisLinkerPlugin extends Plugin {
     async onload() {
-        this.registerEditorExtension(risLivePreviewPlugin);
+        console.log("Loading RIS Linker (Hard Markdown Replacer)");
 
-        this.registerMarkdownPostProcessor((element) => {
-            const textNodes: Text[] = [];
-            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
-            let node;
+        // Register the auto-replacer extension
+        this.registerEditorExtension(autoReplacePlugin);
+    }
 
-            while (node = walker.nextNode()) {
-                if (node.nodeValue && node.parentNode?.nodeName !== 'A' && node.parentNode?.nodeName !== 'CODE') {
-                    textNodes.push(node as Text);
-                }
-            }
-
-            for (const textNode of textNodes) {
-                const text = textNode.nodeValue || '';
-                let match;
-                let lastIndex = 0;
-                const fragment = document.createDocumentFragment();
-                let found = false;
-
-                lawRegex.lastIndex = 0;
-
-                while ((match = lawRegex.exec(text)) !== null) {
-                    found = true;
-                    const url = getRisUrl(match[1], match[2], match[3]);
-
-                    fragment.appendChild(document.createTextNode(text.substring(lastIndex, match.index)));
-
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.className = 'external-link';
-                    a.target = '_blank';
-                    a.rel = 'noopener';
-                    a.textContent = match[0];
-                    fragment.appendChild(a);
-
-                    lastIndex = lawRegex.lastIndex;
-                }
-
-                if (found) {
-                    fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
-                    textNode.parentNode?.replaceChild(fragment, textNode);
-                }
-            }
-        });
+    onunload() {
+        console.log("Unloading RIS Linker");
     }
 }

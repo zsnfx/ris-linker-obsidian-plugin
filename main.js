@@ -24,7 +24,6 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
-var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
 var lawRegex = /([a-zA-ZÄÖÜäöü-]+)\s*(§|Art\.?)\s*(\d+[a-z]*)/g;
 function getRisUrl(law, type, num) {
@@ -35,73 +34,53 @@ function getRisUrl(law, type, num) {
     return `https://www.ris.bka.gv.at/Ergebnis.wxe?Abfrage=Bundesnormen&Titel=${law}&VonParagraf=${num}&BisParagraf=${num}`;
   }
 }
-var risLivePreviewPlugin = import_view.ViewPlugin.fromClass(class {
-  constructor(view) {
-    this.decorations = this.buildDecorations(view);
-  }
+var autoReplacePlugin = import_view.ViewPlugin.fromClass(class {
   update(update) {
-    if (update.docChanged || update.viewportChanged) {
-      this.decorations = this.buildDecorations(update.view);
-    }
-  }
-  buildDecorations(view) {
-    const builder = new import_state.RangeSetBuilder();
-    for (let { from, to } of view.visibleRanges) {
-      const text = view.state.doc.sliceString(from, to);
+    if (!update.docChanged)
+      return;
+    update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+      if (inserted.length === 0)
+        return;
+      const insertedString = inserted.toString();
+      if (insertedString !== " " && insertedString !== "\n")
+        return;
+      const checkStart = Math.max(0, toB - 50);
+      const textToInspect = update.state.doc.sliceString(checkStart, toB);
+      lawRegex.lastIndex = 0;
       let match;
-      while ((match = lawRegex.exec(text)) !== null) {
-        const start = from + match.index;
-        const end = start + match[0].length;
-        const url = getRisUrl(match[1], match[2], match[3]);
-        builder.add(start, end, import_view.Decoration.mark({
-          tagName: "a",
-          class: "cm-url",
-          attributes: { href: url, target: "_blank", rel: "noopener" }
-        }));
+      let lastMatch = null;
+      while ((match = lawRegex.exec(textToInspect)) !== null) {
+        lastMatch = match;
       }
-    }
-    return builder.finish();
-  }
-}, {
-  decorations: (v) => v.decorations
-});
-var RisLinkerPlugin = class extends import_obsidian.Plugin {
-  async onload() {
-    this.registerEditorExtension(risLivePreviewPlugin);
-    this.registerMarkdownPostProcessor((element) => {
-      const textNodes = [];
-      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
-      let node;
-      while (node = walker.nextNode()) {
-        if (node.nodeValue && node.parentNode?.nodeName !== "A" && node.parentNode?.nodeName !== "CODE") {
-          textNodes.push(node);
-        }
-      }
-      for (const textNode of textNodes) {
-        const text = textNode.nodeValue || "";
-        let match;
-        let lastIndex = 0;
-        const fragment = document.createDocumentFragment();
-        let found = false;
-        lawRegex.lastIndex = 0;
-        while ((match = lawRegex.exec(text)) !== null) {
-          found = true;
-          const url = getRisUrl(match[1], match[2], match[3]);
-          fragment.appendChild(document.createTextNode(text.substring(lastIndex, match.index)));
-          const a = document.createElement("a");
-          a.href = url;
-          a.className = "external-link";
-          a.target = "_blank";
-          a.rel = "noopener";
-          a.textContent = match[0];
-          fragment.appendChild(a);
-          lastIndex = lawRegex.lastIndex;
-        }
-        if (found) {
-          fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
-          textNode.parentNode?.replaceChild(fragment, textNode);
+      if (lastMatch) {
+        const matchEndIndexInState = checkStart + lastMatch.index + lastMatch[0].length;
+        if (matchEndIndexInState === fromB) {
+          const law = lastMatch[1];
+          const symbol = lastMatch[2];
+          const num = lastMatch[3];
+          const originalText = lastMatch[0];
+          const url = getRisUrl(law, symbol, num);
+          const markdownLink = `[${originalText}](${url})`;
+          setTimeout(() => {
+            update.view.dispatch({
+              changes: {
+                from: matchEndIndexInState - originalText.length,
+                to: matchEndIndexInState,
+                insert: markdownLink
+              }
+            });
+          }, 0);
         }
       }
     });
+  }
+});
+var RisLinkerPlugin = class extends import_obsidian.Plugin {
+  async onload() {
+    console.log("Loading RIS Linker (Hard Markdown Replacer)");
+    this.registerEditorExtension(autoReplacePlugin);
+  }
+  onunload() {
+    console.log("Unloading RIS Linker");
   }
 };
