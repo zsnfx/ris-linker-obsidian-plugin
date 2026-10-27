@@ -9,11 +9,12 @@ const DEFAULT_SETTINGS: RisLinkerSettings = {
     autoReplaceEnabled: true
 }
 
-// Matches: ABGB § 1330 OR ABGB §§ 6, 7 OR ABGB § 6 und 7
-const prefixRegex = /((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)$/;
+// Updated Regex: The law abbreviation MUST contain at least one uppercase letter [A-ZÄÖÜ].
+// Matches: ABGB § 1330 OR UStG § 6
+// Will NOT match: unzulässig Art 15
+const prefixRegex = /((?:\[\[|\[|<[^>]+>)?([a-zA-Zäöüß-]*[A-ZÄÖÜ][a-zA-Zäöüß-]*)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)$/;
 
-// Matches: § 1330 ABGB OR §§ 6, 7 ABGB OR § 6 und 7 ABGB
-const postfixRegex = /(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)$/;
+const postfixRegex = /(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-Zäöüß-]*[A-ZÄÖÜ][a-zA-Zäöüß-]*)(?:\]\]|\]|<[^>]+>)?)$/;
 
 function getRisUrl(law: string, type: string, numString: string): string {
     const isArt = type.includes('Art');
@@ -112,13 +113,13 @@ export default class RisLinkerPlugin extends Plugin {
         let content = editor.getValue();
 
         // Replace Prefix globally
-        content = content.replace(/((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)/g, (match, fullWrap, law, sym, num) => {
+        content = content.replace(/((?:\[\[|\[|<[^>]+>)?([a-zA-Zäöüß-]*[A-ZÄÖÜ][a-zA-Zäöüß-]*)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)/g, (match, fullWrap, law, sym, num) => {
             if (match.includes('](')) return match;
             return "[" + match + "](" + getRisUrl(law, sym, num) + ")";
         });
 
         // Replace Postfix globally
-        content = content.replace(/(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)/g, (match, sym, num, fullWrap, law) => {
+        content = content.replace(/(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-Zäöüß-]*[A-ZÄÖÜ][a-zA-Zäöüß-]*)(?:\]\]|\]|<[^>]+>)?)/g, (match, sym, num, fullWrap, law) => {
             if (match.includes('](')) return match;
             return "[" + match + "](" + getRisUrl(law, sym, num) + ")";
         });

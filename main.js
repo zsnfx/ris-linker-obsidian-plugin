@@ -28,8 +28,8 @@ var import_view = require("@codemirror/view");
 var DEFAULT_SETTINGS = {
   autoReplaceEnabled: true
 };
-var prefixRegex = /((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)$/;
-var postfixRegex = /(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)$/;
+var prefixRegex = /((?:\[\[|\[|<[^>]+>)?([a-zA-Zäöüß-]*[A-ZÄÖÜ][a-zA-Zäöüß-]*)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)$/;
+var postfixRegex = /(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-Zäöüß-]*[A-ZÄÖÜ][a-zA-Zäöüß-]*)(?:\]\]|\]|<[^>]+>)?)$/;
 function getRisUrl(law, type, numString) {
   const isArt = type.includes("Art");
   const paramType = isArt ? "Artikel" : "Paragraf";
@@ -100,12 +100,12 @@ var RisLinkerPlugin = class extends import_obsidian.Plugin {
   }
   convertEntireFile(editor) {
     let content = editor.getValue();
-    content = content.replace(/((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)/g, (match, fullWrap, law, sym, num) => {
+    content = content.replace(/((?:\[\[|\[|<[^>]+>)?([a-zA-Zäöüß-]*[A-ZÄÖÜ][a-zA-Zäöüß-]*)(?:\]\]|\]|<[^>]+>)?)\s*(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)/g, (match, fullWrap, law, sym, num) => {
       if (match.includes("]("))
         return match;
       return "[" + match + "](" + getRisUrl(law, sym, num) + ")";
     });
-    content = content.replace(/(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-ZÄÖÜäöü-]+)(?:\]\]|\]|<[^>]+>)?)/g, (match, sym, num, fullWrap, law) => {
+    content = content.replace(/(§§?|Art\.?)\s*(\d+[a-z]*(?:\s*(?:,|und|&|-)\s*\d+[a-z]*)*)\s*((?:\[\[|\[|<[^>]+>)?([a-zA-Zäöüß-]*[A-ZÄÖÜ][a-zA-Zäöüß-]*)(?:\]\]|\]|<[^>]+>)?)/g, (match, sym, num, fullWrap, law) => {
       if (match.includes("]("))
         return match;
       return "[" + match + "](" + getRisUrl(law, sym, num) + ")";
